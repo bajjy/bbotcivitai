@@ -11,6 +11,15 @@ function optional(name, fallback) {
   return v && v.trim() ? v.trim() : fallback;
 }
 
+function parseIdList(name) {
+  return optional(name, '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n));
+}
+
 export const config = {
   botToken: required('BOT_TOKEN'),
   civitaiApiKey: required('CIVITAI_API_KEY'),
@@ -26,10 +35,7 @@ export const config = {
 
   photoTtlSeconds: parseInt(optional('PHOTO_TTL_SECONDS', '900'), 10),
 
-  allowedUserIds: optional('ALLOWED_USER_IDS', '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number(s))
-    .filter((n) => Number.isFinite(n)),
+  // Comma-separated lists. Empty list = no restriction on that axis.
+  allowedUserIds: parseIdList('ALLOWED_USER_IDS'),
+  allowedChatIds: parseIdList('ALLOWED_CHAT_IDS'),
 };

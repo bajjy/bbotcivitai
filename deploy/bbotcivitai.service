@@ -1,0 +1,35 @@
+[Unit]
+Description=bbotcivitai — Telegram photo-enhancement bot (Civitai Qwen-Image)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust: where the repo lives on the VPS, and which user runs it
+WorkingDirectory=/opt/bbotcivitai
+User=bbot
+Group=bbot
+EnvironmentFile=/opt/bbotcivitai/.env
+ExecStart=/usr/bin/node bot.mjs
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bbotcivitai
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bbotcivitai/temp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

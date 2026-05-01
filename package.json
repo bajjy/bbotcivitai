@@ -1,0 +1,21 @@
+{
+  "name": "bbotcivitai",
+  "version": "0.1.0",
+  "description": "Telegram bot that enhances photos via Civitai's Qwen-Image img2img (createVariant). Long-polling, deployed on a Hetzner VPS.",
+  "type": "module",
+  "main": "bot.mjs",
+  "scripts": {
+    "start": "node bot.mjs",
+    "dev": "node --env-file=.env bot.mjs",
+    "check": "node --check bot.mjs && node --check services/civitai.mjs && node --check services/photoHost.mjs && node --check config/config.mjs && node --check utils/paths.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "grammy": "^1.30.0"
+  },
+  "license": "ISC"
+}

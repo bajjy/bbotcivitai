@@ -1,26 +1,25 @@
 /**
  * Civitai orchestrator client — Qwen-Image img2img (createVariant).
  *
- * Endpoint contract (verified against developer.civitai.com/orchestration/recipes/qwen):
+ * Endpoint contract:
  *   POST https://orchestration.civitai.com/v2/consumer/workflows?wait=<seconds>
  *   Authorization: Bearer <token>
  *   { "steps": [ { "$type": "imageGen", "input": { ... } } ] }
  *
- * Important constraints:
- *   - "image" is a PLAIN STRING URL (not { url: ... }), and Civitai must be able to GET it.
- *   - "strength" is the denoise strength: 0.0 returns source unchanged, 1.0 discards source.
- *   - For createVariant width/height are inferred from the source — do not set them.
- *   - "ecosystem" must be lowercase "qwen", engine "sdcpp" uses the open-weights pipeline.
+ * Image input: The "image" field is base64-encoded (NOT a URL — runtime
+ * confirmed "Input image failed to decode Base64 data" when a URL was sent).
+ * We send a data-URI ("data:image/jpeg;base64,..."); flip useDataUri=false
+ * inside encodeImage() if Civitai ever wants plain base64 instead.
  */
 
 import { config } from '../config/config.mjs';
 
 const ORCHESTRATOR = 'https://orchestration.civitai.com';
-const SUBMIT_WAIT_SECONDS = 60;     // synchronous wait on submit (max ~100s)
+const SUBMIT_WAIT_SECONDS = 60;
 const POLL_INTERVAL_MS = 3000;
-const POLL_TIMEOUT_MS = 5 * 60_000; // 5 min hard cap
+const POLL_TIMEOUT_MS = 5 * 60_000;
 
-function buildCreateVariantPayload({ imageUrl, prompt, strength }) {
+function buildCreateVariantPayload({ imageData, prompt, strength }) {
   return {
     steps: [
       {
@@ -31,12 +30,17 @@ function buildCreateVariantPayload({ imageUrl, prompt, strength }) {
           model: '20b',
           operation: 'createVariant',
           prompt,
-          image: imageUrl,
+          image: imageData,
           strength,
         },
       },
     ],
   };
+}
+
+function encodeImage(buffer, mimeType = 'image/jpeg', useDataUri = true) {
+  const b64 = Buffer.from(buffer).toString('base64');
+  return useDataUri ? `data:${mimeType};base64,${b64}` : b64;
 }
 
 async function civitaiFetch(pathname, init = {}) {
@@ -50,11 +54,8 @@ async function civitaiFetch(pathname, init = {}) {
   });
   const text = await res.text();
   let body;
-  try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    body = { raw: text };
-  }
+  try { body = text ? JSON.parse(text) : {}; }
+  catch { body = { raw: text }; }
   if (!res.ok) {
     const err = new Error(
       `Civitai ${init.method || 'GET'} ${pathname} -> ${res.status} ${res.statusText}: ${text}`
@@ -76,17 +77,17 @@ function extractFinishedImageUrl(workflow) {
     err.workflow = workflow;
     throw err;
   }
-  const url = step?.output?.images?.[0]?.url;
-  return url || null;
+  return step?.output?.images?.[0]?.url || null;
 }
 
-/**
- * Submit a Qwen createVariant job and wait (synchronously up to SUBMIT_WAIT_SECONDS,
- * then poll) until it finishes or the timeout hits.
- */
-export async function enhancePhoto({ imageUrl, prompt, strength }) {
+export async function enhancePhoto({ imageBuffer, mimeType, prompt, strength }) {
+  if (!Buffer.isBuffer(imageBuffer)) {
+    throw new Error('enhancePhoto: imageBuffer must be a Buffer');
+  }
+  const imageData = encodeImage(imageBuffer, mimeType || 'image/jpeg', true);
+
   const payload = buildCreateVariantPayload({
-    imageUrl,
+    imageData,
     prompt: prompt || config.qwenDefaultPrompt,
     strength: typeof strength === 'number' ? strength : config.qwenStrength,
   });
@@ -96,7 +97,6 @@ export async function enhancePhoto({ imageUrl, prompt, strength }) {
     { method: 'POST', body: JSON.stringify(payload) }
   );
 
-  // Synchronous wait may have already produced the image
   const earlyUrl = extractFinishedImageUrl(submitted);
   if (earlyUrl) return { imageUrl: earlyUrl, workflow: submitted };
 
@@ -118,5 +118,4 @@ export async function enhancePhoto({ imageUrl, prompt, strength }) {
   throw new Error(`Timed out after ${POLL_TIMEOUT_MS / 1000}s waiting for workflow ${workflowId}`);
 }
 
-// Exported for tests / dry-runs
-export const _internals = { buildCreateVariantPayload, extractFinishedImageUrl };
+export const _internals = { buildCreateVariantPayload, extractFinishedImageUrl, encodeImage };

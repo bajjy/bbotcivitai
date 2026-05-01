@@ -1,15 +1,12 @@
 /**
  * bbotcivitai — Telegram bot that enhances photos with Civitai's Qwen-Image
- * img2img (createVariant). Long-polling, single-process, designed for systemd
- * on a Hetzner VPS.
+ * img2img (createVariant). Long-polling, single-process.
  *
  * Flow per photo:
  *   1. User sends a photo (optionally with a caption used as the prompt)
  *   2. Bot downloads it from Telegram
- *   3. Bot writes it to temp/ and exposes it at PUBLIC_HOST_URL/photos/{id}
- *   4. Bot submits a Qwen createVariant workflow to Civitai
- *   5. Bot polls until done, downloads the result, sends it back as a photo
- *   6. Temp file is disposed
+ *   3. Bot submits a Qwen createVariant workflow to Civitai (image as base64)
+ *   4. Bot polls until done, downloads the result, sends it back as a photo
  */
 
 import { Bot, InputFile } from 'grammy';
@@ -18,7 +15,6 @@ import { enhancePhoto } from './services/civitai.mjs';
 import {
   startPhotoHost,
   stopPhotoHost,
-  hostPhoto,
   sweepStaleTempFiles,
 } from './services/photoHost.mjs';
 
@@ -63,12 +59,10 @@ bot.command('help', (ctx) =>
 // --- Photo handler ----------------------------------------------------------
 bot.on('message:photo', async (ctx) => {
   const sizes = ctx.message.photo;
-  // Telegram returns multiple sizes ascending — take the largest
   const largest = sizes[sizes.length - 1];
   const caption = (ctx.message.caption || '').trim();
 
   let statusMsg;
-  let hosted;
   try {
     statusMsg = await ctx.reply('Got it. Enhancing... (~30–90s)');
 
@@ -79,13 +73,17 @@ bot.on('message:photo', async (ctx) => {
     if (!fileResp.ok) throw new Error(`Telegram file download failed: ${fileResp.status}`);
     const buffer = Buffer.from(await fileResp.arrayBuffer());
 
-    // 2) Host it for Civitai
+    // 2) Pick a mime type from the file extension Telegram gave us
     const ext = (file.file_path?.split('.').pop() || 'jpg').toLowerCase();
-    hosted = hostPhoto(buffer, ext);
+    const mimeType =
+      ext === 'png' ? 'image/png' :
+      ext === 'webp' ? 'image/webp' :
+      'image/jpeg';
 
-    // 3) Submit + poll
+    // 3) Submit + poll (image goes as base64 inside the request body)
     const { imageUrl: resultUrl } = await enhancePhoto({
-      imageUrl: hosted.publicUrl,
+      imageBuffer: buffer,
+      mimeType,
       prompt: caption || config.qwenDefaultPrompt,
     });
 
@@ -112,8 +110,6 @@ bot.on('message:photo', async (ctx) => {
     } else {
       await ctx.reply(msg).catch(() => {});
     }
-  } finally {
-    hosted?.dispose();
   }
 });
 
@@ -138,12 +134,8 @@ async function main() {
 
 async function shutdown(signal) {
   console.log(`\n[bot] received ${signal}, shutting down…`);
-  try {
-    await bot.stop();
-  } catch {}
-  try {
-    await stopPhotoHost();
-  } catch {}
+  try { await bot.stop(); } catch {}
+  try { await stopPhotoHost(); } catch {}
   process.exit(0);
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
